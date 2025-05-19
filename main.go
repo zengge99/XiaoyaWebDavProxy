@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"encoding/xml"
 
 	"golang.org/x/net/webdav"
 )
@@ -169,7 +169,8 @@ func (fs *TextWebDAVFileSystem) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// 实现webdav.FileSystem接口
+// 实现webdav.FileSystem接口的所有必需方法
+
 func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
@@ -219,6 +220,21 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 		isDir:   false,
 		modTime: time.Now(),
 	}, nil
+}
+
+func (fs *TextWebDAVFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+	fmt.Printf("Mkdir attempted: %s (read-only)\n", name)
+	return os.ErrPermission
+}
+
+func (fs *TextWebDAVFileSystem) RemoveAll(ctx context.Context, name string) error {
+	fmt.Printf("RemoveAll attempted: %s (read-only)\n", name)
+	return os.ErrPermission
+}
+
+func (fs *TextWebDAVFileSystem) Rename(ctx context.Context, oldName, newName string) error {
+	fmt.Printf("Rename attempted: %s -> %s (read-only)\n", oldName, newName)
+	return os.ErrPermission
 }
 
 // 虚拟文件方法
