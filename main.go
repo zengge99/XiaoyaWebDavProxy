@@ -121,7 +121,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 		fmt.Println("Creating root directory")
 		vfs.files["/"] = &VirtualFile{
 			name:        "",
-			displayName: "",
+			displayName: "Root",
 			size:        0,
 			modTime:     time.Now(),
 			isDir:       true,
@@ -130,7 +130,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 		// 设置根目录的 displayname 属性
 		vfs.files["/"].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
 			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-			InnerXML: []byte(""),
+			InnerXML: []byte("Root"),
 		}
 	}
 
@@ -139,16 +139,19 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 
 // 实现 DeadPropsHolder 接口
 func (vf *VirtualFile) DeadProps() (map[xml.Name]webdav.Property, error) {
+	fmt.Printf("Getting dead props for file: %s\n", vf.name)
 	return vf.properties, nil
 }
 
 func (vf *VirtualFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
+	fmt.Printf("Patching properties for file: %s\n", vf.name)
 	for _, patch := range patches {
 		for _, prop := range patch.Props {
 			vf.properties[prop.XMLName] = prop
 			// 如果更新的是 displayname，同步更新 displayName 字段
 			if prop.XMLName.Local == "displayname" {
 				vf.displayName = string(prop.InnerXML)
+				fmt.Printf("Updated displayName to: %s\n", vf.displayName)
 			}
 		}
 	}
