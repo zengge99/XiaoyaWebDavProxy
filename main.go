@@ -316,6 +316,135 @@ func (vfs *VirtualFileSystem) Stat(ctx context.Context, name string) (os.FileInf
 	return f, nil
 }
 
+// 在 VirtualFileSystem 结构体定义后添加以下方法
+
+func (vfs *VirtualFileSystem) PropFind(ctx context.Context, name string, propnames []xml.Name) ([]webdav.Propstat, error) {
+    fmt.Printf("[PROPFIND] Request for: %s, props: %v\n", name, propnames)
+
+    file, exists := vfs.files[name]
+    if !exists {
+        fmt.Printf("[PROPFIND] File not found: %s\n", name)
+        return nil, os.ErrNotExist
+    }
+
+    // 获取文件的所有属性
+    allProps, err := file.DeadProps()
+    if err != nil {
+        fmt.Printf("[PROPFIND] Error getting properties for %s: %v\n", name, err)
+        return nil, err
+    }
+
+    // 如果没有指定属性名，返回所有属性
+    if len(propnames) == 0 {
+        fmt.Printf("[PROPFIND] Returning all properties for %s\n", name)
+        var props []webdav.Property
+        for _, prop := range allProps {
+            props = append(props, prop)
+        }
+        return []webdav.Propstat{{
+            Status: http.StatusOK,
+            Props:  props,
+        }}, nil
+    }
+
+    // 处理请求的特定属性
+    var foundProps []webdav.Property
+    var notFoundProps []xml.Name
+
+    for _, pn := range propnames {
+        // 处理标准 DAV 属性
+        if pn.Space == "DAV:" {
+            switch pn.Local {
+            case "displayname":
+                foundProps = append(foundProps, webdav.Property{
+                    XMLName:  pn,
+                    InnerXML: []byte(file.displayName),
+                })
+                continue
+            case "getcontentlength":
+                if !file.isDir {
+                    foundProps = append(foundProps, webdav.Property{
+                        XMLName:  pn,
+                        InnerXML: []byte(strconv.FormatInt(file.size, 10)),
+                    })
+                }
+                continue
+            case "getlastmodified":
+                foundProps = append(foundProps, webdav.Property{
+                    XMLName:  pn,
+                    InnerXML: []byte(file.modTime.Format(time.RFC1123)),
+                })
+                continue
+            case "resourcetype":
+                var resType string
+                if file.isDir {
+                    resType = "<D:collection/>"
+                } else {
+                    resType = ""
+                }
+                foundProps = append(foundProps, webdav.Property{
+                    XMLName:  pn,
+                    InnerXML: []byte(resType),
+                })
+                continue
+            case "getcontenttype":
+                if !file.isDir {
+                    contentType := "application/octet-stream"
+                    ext := strings.ToLower(filepath.Ext(file.name))
+                    switch ext {
+                    case ".txt":
+                        contentType = "text/plain"
+                    case ".html", ".htm":
+                        contentType = "text/html"
+                    case ".jpg", ".jpeg":
+                        contentType = "image/jpeg"
+                    case ".png":
+                        contentType = "image/png"
+                    case ".mkv":
+                        contentType = "video/x-matroska"
+                    }
+                    foundProps = append(foundProps, webdav.Property{
+                        XMLName:  pn,
+                        InnerXML: []byte(contentType),
+                    })
+                }
+                continue
+            }
+        }
+
+        // 检查自定义属性
+        if prop, ok := allProps[pn]; ok {
+            foundProps = append(foundProps, prop)
+        } else {
+            notFoundProps = append(notFoundProps, pn)
+        }
+    }
+
+    // 构建响应
+    var propstats []webdav.Propstat
+
+    if len(foundProps) > 0 {
+        propstats = append(propstats, webdav.Propstat{
+            Status: http.StatusOK,
+            Props:  foundProps,
+        })
+    }
+
+    if len(notFoundProps) > 0 {
+        var notFound []webdav.Property
+        for _, pn := range notFoundProps {
+            notFound = append(notFound, webdav.Property{XMLName: pn})
+        }
+        propstats = append(propstats, webdav.Propstat{
+            Status: http.StatusNotFound,
+            Props:  notFound,
+        })
+    }
+
+    fmt.Printf("[PROPFIND] Response for %s: %+v\n", name, propstats)
+    return propstats, nil
+}
+
 // VirtualFileHandle 实现 webdav.File 接口
 type VirtualFileHandle struct {
 	file    *VirtualFile
