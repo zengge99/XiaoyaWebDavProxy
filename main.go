@@ -59,8 +59,12 @@ func main() {
 	fmt.Printf("WebDAV 模拟器已启动\n用户名: 1\n密码: 1\n")
 
 	err := fs.LoadFromText(`
+/玫瑰的故事(2025)/1.mkv#1024#1.mkv
+/玫瑰的故事(2025)/2.mkv#1024#2.mkv
 /红楼梦(1987)/1.mkv#1024#1.mkv
 /红楼梦(1987)/2.mkv#1024#2.mkv
+/a/西游记(1986)^/1.mkv#1024#1.mkv
+/a/西游记(1986)^/2.mkv#1024#2.mkv
 /哪吒2(2025)_1.mkv#1024#哪吒2(2025)_1.mkv
 `)
 	if err != nil {
