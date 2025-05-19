@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -21,11 +22,13 @@ type VirtualFileSystem struct {
 }
 
 type VirtualFile struct {
-	name    string
-	size    int64
-	modTime time.Time
-	isDir   bool
-	content []byte // 对于目录为空
+	name        string
+	displayName string // 新增 displayName 字段
+	size        int64
+	modTime     time.Time
+	isDir       bool
+	content     []byte
+	properties  map[xml.Name]webdav.Property // 存储 WebDAV 属性
 }
 
 func NewVirtualFileSystem() *VirtualFileSystem {
@@ -45,13 +48,20 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 			continue
 		}
 
+		// 修改解析逻辑，支持 displayname
 		parts := strings.Split(line, "#")
-		if len(parts) != 2 {
+		if len(parts) < 2 {
 			return fmt.Errorf("invalid line format: %s", line)
 		}
 
 		path := strings.TrimSpace(parts[0])
 		sizeStr := strings.TrimSpace(parts[1])
+		displayName := ""
+		
+		// 如果有第三个部分，就是 displayname
+		if len(parts) >= 3 {
+			displayName = strings.TrimSpace(parts[2])
+		}
 
 		size, err := strconv.ParseInt(sizeStr, 10, 64)
 		if err != nil {
@@ -69,21 +79,40 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 				if _, exists := vfs.files[dirPath]; !exists {
 					fmt.Printf("Creating directory: %s\n", dirPath)
 					vfs.files[dirPath] = &VirtualFile{
-						name:    filepath.Base(dirPath),
-						size:    0,
-						modTime: time.Now(),
-						isDir:   true,
+						name:        filepath.Base(dirPath),
+						displayName: filepath.Base(dirPath),
+						size:        0,
+						modTime:     time.Now(),
+						isDir:       true,
+						properties:  make(map[xml.Name]webdav.Property),
+					}
+					// 设置目录的 displayname 属性
+					vfs.files[dirPath].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+						XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+						InnerXML: []byte(filepath.Base(dirPath)),
 					}
 				}
 			}
 		}
 
-		fmt.Printf("Adding file: %s, size: %d\n", path, size)
+		// 设置文件的 displayname，如果没有指定则使用文件名
+		if displayName == "" {
+			displayName = filepath.Base(path)
+		}
+
+		fmt.Printf("Adding file: %s, size: %d, displayName: %s\n", path, size, displayName)
 		vfs.files[path] = &VirtualFile{
-			name:    filepath.Base(path),
-			size:    size,
-			modTime: time.Now(),
-			isDir:   false,
+			name:        filepath.Base(path),
+			displayName: displayName,
+			size:        size,
+			modTime:     time.Now(),
+			isDir:       false,
+			properties:  make(map[xml.Name]webdav.Property),
+		}
+		// 设置文件的 displayname 属性
+		vfs.files[path].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+			InnerXML: []byte(displayName),
 		}
 	}
 
@@ -91,14 +120,42 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 	if _, exists := vfs.files["/"]; !exists {
 		fmt.Println("Creating root directory")
 		vfs.files["/"] = &VirtualFile{
-			name:    "",
-			size:    0,
-			modTime: time.Now(),
-			isDir:   true,
+			name:        "",
+			displayName: "",
+			size:        0,
+			modTime:     time.Now(),
+			isDir:       true,
+			properties:  make(map[xml.Name]webdav.Property),
+		}
+		// 设置根目录的 displayname 属性
+		vfs.files["/"].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+			InnerXML: []byte(""),
 		}
 	}
 
 	return nil
+}
+
+// 实现 DeadPropsHolder 接口
+func (vf *VirtualFile) DeadProps() (map[xml.Name]webdav.Property, error) {
+	return vf.properties, nil
+}
+
+func (vf *VirtualFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
+	for _, patch := range patches {
+		for _, prop := range patch.Props {
+			vf.properties[prop.XMLName] = prop
+			// 如果更新的是 displayname，同步更新 displayName 字段
+			if prop.XMLName.Local == "displayname" {
+				vf.displayName = string(prop.InnerXML)
+			}
+		}
+	}
+	return []webdav.Propstat{{
+		Status: http.StatusOK,
+		Props:  []webdav.Property{},
+	}}, nil
 }
 
 // 以下是实现 webdav.FileSystem 接口的方法，都添加了 context.Context 参数
@@ -110,10 +167,17 @@ func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.Fi
 		return os.ErrExist
 	}
 	vfs.files[name] = &VirtualFile{
-		name:    filepath.Base(name),
-		size:    0,
-		modTime: time.Now(),
-		isDir:   true,
+		name:        filepath.Base(name),
+		displayName: filepath.Base(name),
+		size:        0,
+		modTime:     time.Now(),
+		isDir:       true,
+		properties:  make(map[xml.Name]webdav.Property),
+	}
+	// 设置新目录的 displayname 属性
+	vfs.files[name].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+		XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+		InnerXML: []byte(filepath.Base(name)),
 	}
 	fmt.Printf("Directory created: %s\n", name)
 	return nil
@@ -126,10 +190,17 @@ func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag in
 		if flag&os.O_CREATE != 0 {
 			fmt.Printf("Creating new file: %s\n", name)
 			f = &VirtualFile{
-				name:    filepath.Base(name),
-				size:    0,
-				modTime: time.Now(),
-				isDir:   false,
+				name:        filepath.Base(name),
+				displayName: filepath.Base(name),
+				size:        0,
+				modTime:     time.Now(),
+				isDir:       false,
+				properties:  make(map[xml.Name]webdav.Property),
+			}
+			// 设置新文件的 displayname 属性
+			f.properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+				XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+				InnerXML: []byte(filepath.Base(name)),
 			}
 			vfs.files[name] = f
 			return &VirtualFileHandle{file: f}, nil
@@ -330,6 +401,7 @@ func (vf *VirtualFileHandle) Write(p []byte) (n int, err error) {
 
 // VirtualFile 实现 os.FileInfo 接口
 func (vf *VirtualFile) Name() string {
+	// 返回文件名，不是 displayname
 	return vf.name
 }
 
@@ -359,10 +431,10 @@ func (vf *VirtualFile) Sys() interface{} {
 var vfs = NewVirtualFileSystem()
 
 func main() {
-	// 示例文件列表
-	fileList := `/a/战狼2.mkv#65342
-/a/b/哪吒闹海.mkv#3389
-/哪吒闹海.mkv#1024`
+	// 示例文件列表，支持 displayname
+	fileList := `/a/战狼2.mkv#65342#战狼2(2017)
+/a/b/哪吒闹海.mkv#3389#哪吒闹海(1979)
+/哪吒闹海.mkv#1024#哪吒2(2025)`
 
 	// 加载虚拟文件系统
 	err := vfs.LoadFromText(fileList)
