@@ -350,7 +350,7 @@ func main() {
 	})
 
 	// 启动服务器
-	port := "8080"
+	port := "39124"
 	fmt.Printf("WebDAV server running on port %s...\n", port)
 	fmt.Println("Use username: admin, password: password to access")
 	err = http.ListenAndServe(":"+port, nil)
