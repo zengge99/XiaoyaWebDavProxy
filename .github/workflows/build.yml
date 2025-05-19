@@ -1,4 +1,4 @@
-name: Build Static Multi-Arch Binaries
+name: Build Multi-Arch Binaries
 
 on:
   push:
@@ -12,36 +12,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for multi-arch
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Go
+      - name: Set up Go 1.23
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
+          go-version: '1.23'  # 匹配 go.mod 要求
+          check-latest: true  # 确保获取最新补丁版本
+
+      - name: Verify Go version
+        run: |
+          go version
+          echo "GOROOT=$(go env GOROOT)"
 
       - name: Get dependencies
         run: |
           go mod tidy
           go get golang.org/x/net/webdav
 
-      - name: Build ARM64 binary (static)
+      - name: Build ARM64 static binary
         run: |
           mkdir -p bin
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD":/usr/src/myapp \
-            -w /usr/src/myapp \
-            golang:1.21-alpine \
-            sh -c 'CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/webdav-simulator-arm64 ./main.go'
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/webdav-simulator-arm64 ./main.go
 
-      - name: Build AMD64 binary (static)
+      - name: Build AMD64 static binary
         run: |
           mkdir -p bin
-          docker run --rm --platform linux/amd64 \
-            -v "$PWD":/usr/src/myapp \
-            -w /usr/src/myapp \
-            golang:1.21-alpine \
-            sh -c 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/webdav-simulator-amd64 ./main.go'
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/webdav-simulator-amd64 ./main.go
 
       - name: Verify binaries
         run: |
@@ -54,5 +49,5 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add bin/
-          git commit -m "Add static multi-arch binaries"
+          git commit -m "Add static binaries built with Go 1.23"
           git push
