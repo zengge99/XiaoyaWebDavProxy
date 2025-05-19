@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,7 +22,8 @@ type FileMeta struct {
 	Size        int64
 	DisplayName string
 	Content     []byte
-	IsDir       bool // 添加IsDir字段
+	IsDir       bool
+	ModTime     time.Time
 }
 
 type TextWebDAVFileSystem struct {
@@ -74,7 +76,16 @@ func main() {
 		LockSystem: webdav.NewMemLS(),
 	}
 
-	authHandler := fs.authMiddleware(handler)
+	// 包装handler以处理PROPFIND请求
+	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			fs.HandlePropfind(w, r)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+
+	authHandler := fs.authMiddleware(wrappedHandler)
 
 	addr := fmt.Sprintf(":%d", fs.Port)
 	fmt.Printf("服务器运行在端口 %d\n", fs.Port)
@@ -123,6 +134,7 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 			DisplayName: displayName,
 			Content:     content,
 			IsDir:       false,
+			ModTime:     time.Now(),
 		}
 		fs.mu.Unlock()
 
@@ -135,6 +147,7 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 					Path:        dir,
 					DisplayName: filepath.Base(dir),
 					IsDir:       true,
+					ModTime:     time.Now(),
 				}
 			}
 			fs.mu.Unlock()
@@ -164,6 +177,117 @@ func (fs *TextWebDAVFileSystem) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	if path == "" {
+		path = "/"
+	}
+
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	// 检查资源是否存在
+	meta, ok := fs.Files[path]
+	if !ok && path != "/" {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	// 构建响应
+	type Propstat struct {
+		Prop []interface{} `xml:"prop"`
+		Status string     `xml:"status"`
+	}
+
+	type Response struct {
+		Href     string   `xml:"href"`
+		Propstat Propstat `xml:"propstat"`
+	}
+
+	multistatus := struct {
+		XMLName    xml.Name `xml:"D:multistatus"`
+		XmlnsD     string   `xml:"xmlns:D,attr"`
+		Response   Response `xml:"response"`
+	}{
+		XmlnsD: "DAV:",
+		Response: Response{
+			Href: path,
+			Propstat: Propstat{
+				Status: "HTTP/1.1 200 OK",
+			},
+		},
+	}
+
+	// 添加displayname属性
+	if ok {
+		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
+			struct {
+				XMLName xml.Name `xml:"displayname"`
+				Value   string   `xml:",chardata"`
+			}{
+				XMLName: xml.Name{Local: "displayname"},
+				Value:   meta.DisplayName,
+			})
+	} else {
+		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
+			struct {
+				XMLName xml.Name `xml:"displayname"`
+				Value   string   `xml:",chardata"`
+			}{
+				XMLName: xml.Name{Local: "displayname"},
+				Value:   "/",
+			})
+	}
+
+	// 添加resourcetype属性
+	if ok && meta.IsDir || path == "/" {
+		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
+			struct {
+				XMLName xml.Name `xml:"resourcetype"`
+				Collection struct{} `xml:"collection"`
+			}{
+				XMLName: xml.Name{Local: "resourcetype"},
+			})
+	} else {
+		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
+			struct {
+				XMLName xml.Name `xml:"resourcetype"`
+			}{
+				XMLName: xml.Name{Local: "resourcetype"},
+			})
+	}
+
+	// 添加getlastmodified属性
+	modTime := time.Now()
+	if ok {
+		modTime = meta.ModTime
+	}
+	multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
+		struct {
+			XMLName xml.Name `xml:"getlastmodified"`
+			Value   string   `xml:",chardata"`
+		}{
+			XMLName: xml.Name{Local: "getlastmodified"},
+			Value:   modTime.UTC().Format(http.TimeFormat),
+		})
+
+	// 添加getcontentlength属性（如果不是目录）
+	if ok && !meta.IsDir {
+		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
+			struct {
+				XMLName xml.Name `xml:"getcontentlength"`
+				Value   int64    `xml:",chardata"`
+			}{
+				XMLName: xml.Name{Local: "getcontentlength"},
+				Value:   meta.Size,
+			})
+	}
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusMultiStatus)
+	xml.NewEncoder(w).Encode(multistatus)
+}
+
 func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
@@ -175,6 +299,7 @@ func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag 
 				DisplayName: "Root",
 				Content:     []byte{},
 				IsDir:       true,
+				ModTime:     time.Now(),
 			},
 			fs: fs,
 		}, nil
@@ -217,7 +342,7 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 		size:    meta.Size,
 		path:    meta.Path,
 		isDir:   meta.IsDir,
-		modTime: time.Now(),
+		modTime: meta.ModTime,
 	}, nil
 }
 
@@ -293,7 +418,7 @@ func (f *VirtualFile) Readdir(count int) ([]os.FileInfo, error) {
 				size:    meta.Size,
 				path:    meta.Path,
 				isDir:   meta.IsDir,
-				modTime: time.Now(),
+				modTime: meta.ModTime,
 			})
 		}
 	}
@@ -307,7 +432,12 @@ func (f *VirtualFile) Stat() (os.FileInfo, error) {
 
 func (fi *VirtualFileInfo) Name() string       { return fi.name }
 func (fi *VirtualFileInfo) Size() int64        { return fi.size }
-func (fi *VirtualFileInfo) Mode() os.FileMode  { return 0444 }
+func (fi *VirtualFileInfo) Mode() os.FileMode  { 
+	if fi.isDir {
+		return 0755 
+	}
+	return 0444 
+}
 func (fi *VirtualFileInfo) ModTime() time.Time { return fi.modTime }
 func (fi *VirtualFileInfo) IsDir() bool        { return fi.isDir }
 func (fi *VirtualFileInfo) Sys() interface{}   { return nil }
