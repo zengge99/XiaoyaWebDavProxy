@@ -200,26 +200,51 @@ func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.Fi
 }
 
 func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	fmt.Printf("[OPEN] File: %s, Flags: %d\n", name, flag)
-	f, exists := vfs.files[name]
-	if !exists {
-		if flag&os.O_CREATE != 0 {
-			fmt.Printf("[CREATE] New file: %s\n", name)
-			f = &VirtualFile{
-				name:        filepath.Base(name),
-				displayName: filepath.Base(name),
-				size:        0,
-				modTime:     time.Now(),
-				isDir:       false,
-				properties:  make(map[xml.Name]webdav.Property),
-			}
-			vfs.files[name] = f
-			vfs.setDisplayName(name, filepath.Base(name))
-			return &VirtualFileHandle{file: f}, nil
-		}
-		return nil, os.ErrNotExist
-	}
-	return &VirtualFileHandle{file: f}, nil
+    fmt.Printf("OpenFile called for: %s, flags: %d\n", name, flag)
+    f, exists := vfs.files[name]
+    if !exists {
+        if flag&os.O_CREATE != 0 {
+            fmt.Printf("Creating new file: %s\n", name)
+            f = &VirtualFile{
+                name:        filepath.Base(name),
+                displayName: filepath.Base(name),
+                size:        0,
+                modTime:     time.Now(),
+                isDir:       false,
+                properties:  make(map[xml.Name]webdav.Property),
+            }
+            // 设置新文件的 displayname 属性
+            f.properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+                XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+                InnerXML: []byte(filepath.Base(name)),
+            }
+            vfs.files[name] = f
+            
+            // 打印所有属性
+            fmt.Println("File properties:")
+            for key, prop := range f.properties {
+                fmt.Printf("  %s/%s: %s\n", key.Space, key.Local, string(prop.InnerXML))
+            }
+            
+            return &VirtualFileHandle{file: f}, nil
+        }
+        fmt.Printf("File not found: %s\n", name)
+        return nil, os.ErrNotExist
+    }
+
+    // 打印现有文件的所有属性
+    fmt.Println("Existing file properties:")
+    for key, prop := range f.properties {
+        fmt.Printf("  %s/%s: %s\n", key.Space, key.Local, string(prop.InnerXML))
+    }
+
+    if flag&os.O_EXCL != 0 && flag&os.O_CREATE != 0 {
+        fmt.Printf("File already exists (O_EXCL): %s\n", name)
+        return nil, os.ErrExist
+    }
+
+    fmt.Printf("Returning file handle for: %s\n", name)
+    return &VirtualFileHandle{file: f}, nil
 }
 
 func (vfs *VirtualFileSystem) RemoveAll(ctx context.Context, name string) error {
