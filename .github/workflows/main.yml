@@ -45,7 +45,7 @@ jobs:
           func main() {
               fmt.Println("Hello, GitHub Actions!")
           }
-          EOF
+        EOF
           echo "✅ Created main.go"
         fi
         
