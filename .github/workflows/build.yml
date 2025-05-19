@@ -1,4 +1,4 @@
-name: Build Static Multi-Arch Binaries
+name: Build Static Binaries with musl
 
 on:
   push:
@@ -14,6 +14,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
@@ -24,25 +29,33 @@ jobs:
           go mod tidy
           go get golang.org/x/net/webdav
 
-      - name: Build Static ARM64 Binary
+      - name: Build ARM64 static binary
         run: |
           mkdir -p bin
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/webdav-simulator-arm64 ./main.go
+          CC=musl-gcc \
+          CGO_ENABLED=1 \
+          GOOS=linux \
+          GOARCH=arm64 \
+          go build -ldflags="-linkmode external -extldflags '-static'" \
+          -o bin/webdav-simulator-arm64 ./main.go
 
-      - name: Build Static AMD64 Binary
+      - name: Build AMD64 static binary
         run: |
           mkdir -p bin
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/webdav-simulator-amd64 ./main.go
+          CC=musl-gcc \
+          CGO_ENABLED=1 \
+          GOOS=linux \
+          GOARCH=amd64 \
+          go build -ldflags="-linkmode external -extldflags '-static'" \
+          -o bin/webdav-simulator-amd64 ./main.go
 
-      - name: Verify Binaries
+      - name: Verify binaries
         run: |
           file bin/webdav-simulator-arm64
           file bin/webdav-simulator-amd64
-          # 检查是否为静态链接
-          ldd bin/webdav-simulator-amd64 2>&1 | grep -q "not a dynamic executable" || exit 1
-          echo "Static binaries verified"
+          ldd bin/webdav-simulator-amd64 2>&1 | grep -q "not a dynamic executable" && echo "Static binary verified" || exit 1
 
-      - name: Get timestamp
+      - name: Get current date
         id: date
         run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
@@ -51,5 +64,5 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add bin/
-          git commit -m "Add static binaries (arm64+amd64) built at ${{ steps.date.outputs.date }}"
+          git commit -m "Add musl static binaries built on ${{ steps.date.outputs.date }} [arm64+amd64]"
           git push
