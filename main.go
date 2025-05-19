@@ -315,8 +315,8 @@ var vfs = NewVirtualFileSystem()
 
 func main() {
 	// 示例文件列表
-	fileList := `/a/file1.mkv#65342
-/a/b/file2.mkv#3389
+	fileList := `/a/战狼2.mkv#65342
+/a/b/哪吒闹海.mkv#3389
 /test.txt#1024`
 
 	// 加载虚拟文件系统
@@ -335,7 +335,7 @@ func main() {
 	// 设置HTTP路由
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		username, password, ok := r.BasicAuth()
-		if !ok || username != "admin" || password != "password" {
+		if !ok || username != "1" || password != "1" {
 			w.Header().Set("WWW-Authenticate", `Basic realm="WebDAV"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -352,7 +352,7 @@ func main() {
 	// 启动服务器
 	port := "39124"
 	fmt.Printf("WebDAV server running on port %s...\n", port)
-	fmt.Println("Use username: admin, password: password to access")
+	fmt.Println("Use username: 1, password: 1 to access")
 	err = http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		fmt.Printf("Server error: %v\n", err)
