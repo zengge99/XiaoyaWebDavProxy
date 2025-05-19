@@ -59,9 +59,9 @@ func main() {
 	fmt.Printf("WebDAV 模拟器已启动\n用户名: 1\n密码: 1\n")
 
 	err := fs.LoadFromText(`
-/1.mkv#1024#哪吒2(2025)
-/2.pdf#512#文档资料
-/docs/3.txt#128#重要笔记
+/dav/1.mkv#1024#六姊妹(2025)_1.mkv
+/dav/2.mkv#1024#六姊妹(2025)_2.mkv
+/dav/a/1.mkv#1024#哪吒2(2025)_1.mkv
 `)
 	if err != nil {
 		fmt.Printf("加载数据错误: %v\n", err)
