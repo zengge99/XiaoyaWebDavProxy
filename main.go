@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -95,7 +96,9 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 	return nil
 }
 
-func (vfs *VirtualFileSystem) Mkdir(name string, perm os.FileMode) error {
+// 以下是实现 webdav.FileSystem 接口的方法，都添加了 context.Context 参数
+
+func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	if _, exists := vfs.files[name]; exists {
 		return os.ErrExist
 	}
@@ -108,7 +111,7 @@ func (vfs *VirtualFileSystem) Mkdir(name string, perm os.FileMode) error {
 	return nil
 }
 
-func (vfs *VirtualFileSystem) OpenFile(name string, flag int, perm os.FileMode) (webdav.File, error) {
+func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
 	f, exists := vfs.files[name]
 	if !exists {
 		if flag&os.O_CREATE != 0 {
@@ -131,7 +134,7 @@ func (vfs *VirtualFileSystem) OpenFile(name string, flag int, perm os.FileMode) 
 	return &VirtualFileHandle{file: f}, nil
 }
 
-func (vfs *VirtualFileSystem) RemoveAll(name string) error {
+func (vfs *VirtualFileSystem) RemoveAll(ctx context.Context, name string) error {
 	toDelete := make([]string, 0)
 	for path := range vfs.files {
 		if path == name || strings.HasPrefix(path, name+"/") {
@@ -145,7 +148,7 @@ func (vfs *VirtualFileSystem) RemoveAll(name string) error {
 	return nil
 }
 
-func (vfs *VirtualFileSystem) Rename(oldName, newName string) error {
+func (vfs *VirtualFileSystem) Rename(ctx context.Context, oldName, newName string) error {
 	oldFile, exists := vfs.files[oldName]
 	if !exists {
 		return os.ErrNotExist
@@ -178,7 +181,7 @@ func (vfs *VirtualFileSystem) Rename(oldName, newName string) error {
 	return nil
 }
 
-func (vfs *VirtualFileSystem) Stat(name string) (os.FileInfo, error) {
+func (vfs *VirtualFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	f, exists := vfs.files[name]
 	if !exists {
 		return nil, os.ErrNotExist
