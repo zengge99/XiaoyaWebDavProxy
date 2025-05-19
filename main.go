@@ -52,7 +52,7 @@ func main() {
 		Port:  39124,
 	}
 
-	fs.Auth["用户名1"] = "密码1"
+	fs.Auth["1"] = "1"
 	fmt.Printf("[系统] 添加用户: 用户名=用户名1, 密码=密码1\n")
 
 	err := fs.LoadFromText(`
