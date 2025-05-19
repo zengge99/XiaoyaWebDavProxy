@@ -187,16 +187,26 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 	defer fs.mu.RUnlock()
 
 	// 检查资源是否存在
-	meta, ok := fs.Files[path]
+	_, ok := fs.Files[path]
 	if !ok && path != "/" {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
 
 	// 构建响应
+	type Prop struct {
+		Displayname     *string `xml:"displayname,omitempty"`
+		Getcontenttype  *string `xml:"getcontenttype,omitempty"`
+		Getcontentlength *int64  `xml:"getcontentlength,omitempty"`
+		Getlastmodified *string `xml:"getlastmodified,omitempty"`
+		Resourcetype    *struct {
+			Collection *struct{} `xml:"collection,omitempty"`
+		} `xml:"resourcetype,omitempty"`
+	}
+
 	type Propstat struct {
-		Prop []interface{} `xml:"prop"`
-		Status string     `xml:"status"`
+		Prop    Prop   `xml:"prop"`
+		Status  string `xml:"status"`
 	}
 
 	type Response struct {
@@ -204,88 +214,114 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 		Propstat Propstat `xml:"propstat"`
 	}
 
-	multistatus := struct {
-		XMLName    xml.Name `xml:"D:multistatus"`
-		XmlnsD     string   `xml:"xmlns:D,attr"`
-		Response   Response `xml:"response"`
-	}{
-		XmlnsD: "DAV:",
-		Response: Response{
+	responses := []Response{}
+
+	// 如果是目录，添加目录本身和其内容
+	if path == "/" || (ok && fs.Files[path].IsDir) {
+		// 添加目录本身的响应
+		displayName := "/"
+		modTime := time.Now()
+		if path != "/" {
+			displayName = fs.Files[path].DisplayName
+			modTime = fs.Files[path].ModTime
+		}
+
+		responses = append(responses, Response{
 			Href: path,
 			Propstat: Propstat{
 				Status: "HTTP/1.1 200 OK",
+				Prop: Prop{
+					Displayname:     &displayName,
+					Getlastmodified: strPtr(modTime.UTC().Format(http.TimeFormat)),
+					Resourcetype: &struct {
+						Collection *struct{} `xml:"collection,omitempty"`
+					}{
+						Collection: &struct{}{},
+					},
+				},
 			},
-		},
-	}
-
-	// 添加displayname属性
-	if ok {
-		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
-			struct {
-				XMLName xml.Name `xml:"displayname"`
-				Value   string   `xml:",chardata"`
-			}{
-				XMLName: xml.Name{Local: "displayname"},
-				Value:   meta.DisplayName,
-			})
-	} else {
-		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
-			struct {
-				XMLName xml.Name `xml:"displayname"`
-				Value   string   `xml:",chardata"`
-			}{
-				XMLName: xml.Name{Local: "displayname"},
-				Value:   "/",
-			})
-	}
-
-	// 添加resourcetype属性
-	if ok && meta.IsDir || path == "/" {
-		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
-			struct {
-				XMLName xml.Name `xml:"resourcetype"`
-				Collection struct{} `xml:"collection"`
-			}{
-				XMLName: xml.Name{Local: "resourcetype"},
-			})
-	} else {
-		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
-			struct {
-				XMLName xml.Name `xml:"resourcetype"`
-			}{
-				XMLName: xml.Name{Local: "resourcetype"},
-			})
-	}
-
-	// 添加getlastmodified属性
-	modTime := time.Now()
-	if ok {
-		modTime = meta.ModTime
-	}
-	multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
-		struct {
-			XMLName xml.Name `xml:"getlastmodified"`
-			Value   string   `xml:",chardata"`
-		}{
-			XMLName: xml.Name{Local: "getlastmodified"},
-			Value:   modTime.UTC().Format(http.TimeFormat),
 		})
 
-	// 添加getcontentlength属性（如果不是目录）
-	if ok && !meta.IsDir {
-		multistatus.Response.Propstat.Prop = append(multistatus.Response.Propstat.Prop, 
-			struct {
-				XMLName xml.Name `xml:"getcontentlength"`
-				Value   int64    `xml:",chardata"`
-			}{
-				XMLName: xml.Name{Local: "getcontentlength"},
-				Value:   meta.Size,
-			})
+		// 添加目录内容的响应
+		for filePath, meta := range fs.Files {
+			if filepath.Dir(filePath) == path && filePath != path {
+				contentType := "application/octet-stream"
+				if strings.HasSuffix(filePath, ".txt") {
+					contentType = "text/plain"
+				} else if strings.HasSuffix(filePath, ".pdf") {
+					contentType = "application/pdf"
+				} else if strings.HasSuffix(filePath, ".mkv") {
+					contentType = "video/x-matroska"
+				}
+
+				var resourcetype *struct {
+					Collection *struct{} `xml:"collection,omitempty"`
+				}
+				if meta.IsDir {
+					resourcetype = &struct {
+						Collection *struct{} `xml:"collection,omitempty"`
+					}{
+						Collection: &struct{}{},
+					}
+				}
+
+				responses = append(responses, Response{
+					Href: filePath,
+					Propstat: Propstat{
+						Status: "HTTP/1.1 200 OK",
+						Prop: Prop{
+							Displayname:     &meta.DisplayName,
+							Getcontenttype:  &contentType,
+							Getcontentlength: &meta.Size,
+							Getlastmodified: strPtr(meta.ModTime.UTC().Format(http.TimeFormat)),
+							Resourcetype:    resourcetype,
+						},
+					},
+				})
+			}
+		}
+	} else {
+		// 单个文件的响应
+		meta := fs.Files[path]
+		contentType := "application/octet-stream"
+		if strings.HasSuffix(path, ".txt") {
+			contentType = "text/plain"
+		} else if strings.HasSuffix(path, ".pdf") {
+			contentType = "application/pdf"
+		} else if strings.HasSuffix(path, ".mkv") {
+			contentType = "video/x-matroska"
+		}
+
+		responses = append(responses, Response{
+			Href: path,
+			Propstat: Propstat{
+				Status: "HTTP/1.1 200 OK",
+				Prop: Prop{
+					Displayname:     &meta.DisplayName,
+					Getcontenttype:  &contentType,
+					Getcontentlength: &meta.Size,
+					Getlastmodified: strPtr(meta.ModTime.UTC().Format(http.TimeFormat)),
+				},
+			},
+		})
+	}
+
+	multistatus := struct {
+		XMLName    xml.Name   `xml:"D:multistatus"`
+		XmlnsD     string     `xml:"xmlns:D,attr"`
+		Responses  []Response `xml:"response"`
+	}{
+		XmlnsD:    "DAV:",
+		Responses: responses,
 	}
 
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusMultiStatus)
 	xml.NewEncoder(w).Encode(multistatus)
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
@@ -432,7 +468,7 @@ func (f *VirtualFile) Stat() (os.FileInfo, error) {
 
 func (fi *VirtualFileInfo) Name() string       { return fi.name }
 func (fi *VirtualFileInfo) Size() int64        { return fi.size }
-func (fi *VirtualFileInfo) Mode() os.FileMode  { 
+func (fi *VirtualFileInfo) Mode() os.FileMode { 
 	if fi.isDir {
 		return 0755 
 	}
