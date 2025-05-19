@@ -16,31 +16,30 @@ import (
 	"golang.org/x/net/webdav"
 )
 
-// VirtualFileSystem 实现 webdav.FileSystem 接口
 type VirtualFileSystem struct {
 	files map[string]*VirtualFile
 }
 
 type VirtualFile struct {
 	name        string
-	displayName string // 新增 displayName 字段
+	displayName string  // 自定义显示名称
 	size        int64
 	modTime     time.Time
 	isDir       bool
 	content     []byte
-	properties  map[xml.Name]webdav.Property // 存储 WebDAV 属性
+	properties  map[xml.Name]webdav.Property
 }
 
 func NewVirtualFileSystem() *VirtualFileSystem {
-	fmt.Println("Creating new VirtualFileSystem")
+	fmt.Println("[INIT] Creating new VirtualFileSystem")
 	return &VirtualFileSystem{
 		files: make(map[string]*VirtualFile),
 	}
 }
 
-// 从文本描述加载文件系统
+// 关键修改1：增强文件加载逻辑
 func (vfs *VirtualFileSystem) LoadFromText(text string) error {
-	fmt.Println("Loading file system from text")
+	fmt.Println("[LOAD] Loading file system from text")
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -48,7 +47,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 			continue
 		}
 
-		// 修改解析逻辑，支持 displayname
+		// 解析格式：path#size#displayname
 		parts := strings.Split(line, "#")
 		if len(parts) < 2 {
 			return fmt.Errorf("invalid line format: %s", line)
@@ -58,9 +57,9 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 		sizeStr := strings.TrimSpace(parts[1])
 		displayName := ""
 		
-		// 如果有第三个部分，就是 displayname
 		if len(parts) >= 3 {
 			displayName = strings.TrimSpace(parts[2])
+			fmt.Printf("[LOAD] Found custom displayname: %s\n", displayName)
 		}
 
 		size, err := strconv.ParseInt(sizeStr, 10, 64)
@@ -68,7 +67,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 			return fmt.Errorf("invalid size in line: %s", line)
 		}
 
-		// 确保所有父目录都存在
+		// 创建父目录
 		dir := filepath.Dir(path)
 		if dir != "." && dir != "/" {
 			parts := strings.Split(strings.TrimPrefix(dir, "/"), "/")
@@ -77,7 +76,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 				current = filepath.Join(current, part)
 				dirPath := "/" + current
 				if _, exists := vfs.files[dirPath]; !exists {
-					fmt.Printf("Creating directory: %s\n", dirPath)
+					fmt.Printf("[MKDIR] Creating directory: %s\n", dirPath)
 					vfs.files[dirPath] = &VirtualFile{
 						name:        filepath.Base(dirPath),
 						displayName: filepath.Base(dirPath),
@@ -86,21 +85,18 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 						isDir:       true,
 						properties:  make(map[xml.Name]webdav.Property),
 					}
-					// 设置目录的 displayname 属性
-					vfs.files[dirPath].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
-						XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-						InnerXML: []byte(filepath.Base(dirPath)),
-					}
+					// 强制设置目录的displayname属性
+					vfs.setDisplayName(dirPath, filepath.Base(dirPath))
 				}
 			}
 		}
 
-		// 设置文件的 displayname，如果没有指定则使用文件名
 		if displayName == "" {
 			displayName = filepath.Base(path)
+			fmt.Printf("[LOAD] Using default displayname: %s\n", displayName)
 		}
 
-		fmt.Printf("Adding file: %s, size: %d, displayName: %s\n", path, size, displayName)
+		fmt.Printf("[ADD] File: %s, Size: %d, DisplayName: %s\n", path, size, displayName)
 		vfs.files[path] = &VirtualFile{
 			name:        filepath.Base(path),
 			displayName: displayName,
@@ -109,16 +105,13 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 			isDir:       false,
 			properties:  make(map[xml.Name]webdav.Property),
 		}
-		// 设置文件的 displayname 属性
-		vfs.files[path].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
-			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-			InnerXML: []byte(displayName),
-		}
+		// 关键修改：确保属性正确设置
+		vfs.setDisplayName(path, displayName)
 	}
 
 	// 确保根目录存在
 	if _, exists := vfs.files["/"]; !exists {
-		fmt.Println("Creating root directory")
+		fmt.Println("[ROOT] Creating root directory")
 		vfs.files["/"] = &VirtualFile{
 			name:        "",
 			displayName: "Root",
@@ -127,32 +120,59 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 			isDir:       true,
 			properties:  make(map[xml.Name]webdav.Property),
 		}
-		// 设置根目录的 displayname 属性
-		vfs.files["/"].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
-			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-			InnerXML: []byte("Root"),
-		}
+		vfs.setDisplayName("/", "Root")
 	}
 
 	return nil
 }
 
-// 实现 DeadPropsHolder 接口
+// 关键修改2：专用方法设置displayname
+func (vfs *VirtualFileSystem) setDisplayName(path, name string) {
+	if file, exists := vfs.files[path]; exists {
+		file.displayName = name
+		file.properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+			InnerXML: []byte(name),
+		}
+		fmt.Printf("[PROP] Set displayname for %s to: %s\n", path, name)
+	}
+}
+
+// 关键修改3：重写DeadProps方法
 func (vf *VirtualFile) DeadProps() (map[xml.Name]webdav.Property, error) {
-	fmt.Printf("Getting dead props for file: %s\n", vf.name)
-	return vf.properties, nil
+	fmt.Printf("[PROP] Getting properties for: %s (displayname=%s)\n", vf.name, vf.displayName)
+	
+	// 创建新的属性集合，确保包含displayname
+	props := make(map[xml.Name]webdav.Property)
+	
+	// 1. 首先放入displayname（确保优先）
+	props[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
+		XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
+		InnerXML: []byte(vf.displayName),
+	}
+	
+	// 2. 合并其他属性
+	for k, v := range vf.properties {
+		if k.Local != "displayname" { // 避免重复
+			props[k] = v
+		}
+	}
+	
+	return props, nil
 }
 
 func (vf *VirtualFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, error) {
-	fmt.Printf("Patching properties for file: %s\n", vf.name)
+	fmt.Printf("[PATCH] Modifying properties for: %s\n", vf.name)
 	for _, patch := range patches {
 		for _, prop := range patch.Props {
-			vf.properties[prop.XMLName] = prop
-			// 如果更新的是 displayname，同步更新 displayName 字段
+			// 特殊处理displayname
 			if prop.XMLName.Local == "displayname" {
-				vf.displayName = string(prop.InnerXML)
-				fmt.Printf("Updated displayName to: %s\n", vf.displayName)
+				newName := string(prop.InnerXML)
+				fmt.Printf("[PATCH] Updating displayname from '%s' to '%s'\n", 
+					vf.displayName, newName)
+				vf.displayName = newName
 			}
+			vf.properties[prop.XMLName] = prop
 		}
 	}
 	return []webdav.Propstat{{
@@ -161,12 +181,10 @@ func (vf *VirtualFile) Patch(patches []webdav.Proppatch) ([]webdav.Propstat, err
 	}}, nil
 }
 
-// 以下是实现 webdav.FileSystem 接口的方法，都添加了 context.Context 参数
-
+// 实现webdav.FileSystem接口（其他方法保持不变）
 func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
-	fmt.Printf("Mkdir called for: %s\n", name)
+	fmt.Printf("[MKDIR] Creating directory: %s\n", name)
 	if _, exists := vfs.files[name]; exists {
-		fmt.Printf("Directory already exists: %s\n", name)
 		return os.ErrExist
 	}
 	vfs.files[name] = &VirtualFile{
@@ -177,21 +195,16 @@ func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.Fi
 		isDir:       true,
 		properties:  make(map[xml.Name]webdav.Property),
 	}
-	// 设置新目录的 displayname 属性
-	vfs.files[name].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
-		XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-		InnerXML: []byte(filepath.Base(name)),
-	}
-	fmt.Printf("Directory created: %s\n", name)
+	vfs.setDisplayName(name, filepath.Base(name))
 	return nil
 }
 
 func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	fmt.Printf("OpenFile called for: %s, flags: %d\n", name, flag)
+	fmt.Printf("[OPEN] File: %s, Flags: %d\n", name, flag)
 	f, exists := vfs.files[name]
 	if !exists {
 		if flag&os.O_CREATE != 0 {
-			fmt.Printf("Creating new file: %s\n", name)
+			fmt.Printf("[CREATE] New file: %s\n", name)
 			f = &VirtualFile{
 				name:        filepath.Base(name),
 				displayName: filepath.Base(name),
@@ -200,24 +213,12 @@ func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag in
 				isDir:       false,
 				properties:  make(map[xml.Name]webdav.Property),
 			}
-			// 设置新文件的 displayname 属性
-			f.properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
-				XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-				InnerXML: []byte(filepath.Base(name)),
-			}
 			vfs.files[name] = f
+			vfs.setDisplayName(name, filepath.Base(name))
 			return &VirtualFileHandle{file: f}, nil
 		}
-		fmt.Printf("File not found: %s\n", name)
 		return nil, os.ErrNotExist
 	}
-
-	if flag&os.O_EXCL != 0 && flag&os.O_CREATE != 0 {
-		fmt.Printf("File already exists (O_EXCL): %s\n", name)
-		return nil, os.ErrExist
-	}
-
-	fmt.Printf("Returning file handle for: %s\n", name)
 	return &VirtualFileHandle{file: f}, nil
 }
 
