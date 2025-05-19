@@ -21,6 +21,7 @@ type FileMeta struct {
 	Size        int64
 	DisplayName string
 	Content     []byte
+	IsDir       bool // 添加IsDir字段
 }
 
 type TextWebDAVFileSystem struct {
@@ -52,12 +53,15 @@ func main() {
 		Port:  39124,
 	}
 
+	// 设置用户名和密码都为1
 	fs.Auth["1"] = "1"
-	fmt.Printf("添加用户: 用户名=用户名1, 密码=密码1\n")
+	fmt.Printf("WebDAV 模拟器已启动\n")
+	fmt.Printf("用户名: 1\n")
+	fmt.Printf("密码: 1\n")
 
 	err := fs.LoadFromText(`
-/1.mkv#1024#哪吒2(2025)
-/2.pdf#512#项目报告2025
+/1.mkv#1024#电影文件
+/2.pdf#512#文档资料
 /docs/3.txt#128#重要笔记
 `)
 	if err != nil {
@@ -73,8 +77,8 @@ func main() {
 	authHandler := fs.authMiddleware(handler)
 
 	addr := fmt.Sprintf(":%d", fs.Port)
-	fmt.Printf("WebDAV 模拟器启动在端口 %d\n", fs.Port)
-	fmt.Printf("测试URL: http://localhost:%d\n", fs.Port)
+	fmt.Printf("服务器运行在端口 %d\n", fs.Port)
+	fmt.Printf("访问地址: http://localhost:%d\n", fs.Port)
 
 	err = http.ListenAndServe(addr, authHandler)
 	if err != nil {
@@ -118,8 +122,23 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 			Size:        size,
 			DisplayName: displayName,
 			Content:     content,
+			IsDir:       false,
 		}
 		fs.mu.Unlock()
+
+		// 自动创建父目录
+		dir := filepath.Dir(path)
+		if dir != "/" {
+			fs.mu.Lock()
+			if _, ok := fs.Files[dir]; !ok {
+				fs.Files[dir] = &FileMeta{
+					Path:        dir,
+					DisplayName: filepath.Base(dir),
+					IsDir:       true,
+				}
+			}
+			fs.mu.Unlock()
+		}
 
 		fmt.Printf("加载文件: %s (%d bytes)\n", path, size)
 	}
@@ -155,6 +174,7 @@ func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag 
 				Path:        "/",
 				DisplayName: "Root",
 				Content:     []byte{},
+				IsDir:       true,
 			},
 			fs: fs,
 		}, nil
@@ -189,18 +209,6 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 
 	meta, ok := fs.Files[name]
 	if !ok {
-		// 检查是否是目录
-		for path := range fs.Files {
-			if strings.HasPrefix(path, name+"/") {
-				return &VirtualFileInfo{
-					name:    filepath.Base(name),
-					size:    0,
-					path:    name,
-					isDir:   true,
-					modTime: time.Now(),
-				}, nil
-			}
-		}
 		return nil, os.ErrNotExist
 	}
 
@@ -208,7 +216,7 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 		name:    meta.DisplayName,
 		size:    meta.Size,
 		path:    meta.Path,
-		isDir:   false,
+		isDir:   meta.IsDir,
 		modTime: time.Now(),
 	}, nil
 }
@@ -230,6 +238,9 @@ func (f *VirtualFile) Close() error {
 }
 
 func (f *VirtualFile) Read(p []byte) (int, error) {
+	if f.meta.IsDir {
+		return 0, io.EOF
+	}
 	if f.pos >= int64(len(f.meta.Content)) {
 		return 0, io.EOF
 	}
@@ -243,6 +254,9 @@ func (f *VirtualFile) Write(p []byte) (int, error) {
 }
 
 func (f *VirtualFile) Seek(offset int64, whence int) (int64, error) {
+	if f.meta.IsDir {
+		return 0, nil
+	}
 	var newPos int64
 	switch whence {
 	case io.SeekStart:
@@ -268,27 +282,23 @@ func (f *VirtualFile) Readdir(count int) ([]os.FileInfo, error) {
 		return nil, os.ErrInvalid
 	}
 
-	var files []os.FileInfo
+	var children []os.FileInfo
 	f.fs.mu.RLock()
 	defer f.fs.mu.RUnlock()
 
 	for path, meta := range f.fs.Files {
-		dir := f.meta.Path
-		if dir != "/" {
-			dir += "/"
-		}
-		if strings.HasPrefix(path, dir) && !strings.Contains(path[len(dir):], "/") {
-			files = append(files, &VirtualFileInfo{
+		if filepath.Dir(path) == f.meta.Path && path != f.meta.Path {
+			children = append(children, &VirtualFileInfo{
 				name:    meta.DisplayName,
 				size:    meta.Size,
 				path:    meta.Path,
-				isDir:   false,
+				isDir:   meta.IsDir,
 				modTime: time.Now(),
 			})
 		}
 	}
 
-	return files, nil
+	return children, nil
 }
 
 func (f *VirtualFile) Stat() (os.FileInfo, error) {
