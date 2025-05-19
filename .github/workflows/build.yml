@@ -1,4 +1,4 @@
-name: Build Multi-Arch Binaries and Commit
+name: Build Static Binaries with musl
 
 on:
   push:
@@ -6,13 +6,18 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-commit:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -24,26 +29,40 @@ jobs:
           go mod tidy
           go get golang.org/x/net/webdav
 
-      - name: Build for Linux ARM64
+      - name: Build ARM64 static binary
         run: |
           mkdir -p bin
-          GOOS=linux GOARCH=arm64 go build -o bin/webdav-simulator-arm64 ./main.go
+          CC=musl-gcc \
+          CGO_ENABLED=1 \
+          GOOS=linux \
+          GOARCH=arm64 \
+          go build -ldflags="-linkmode external -extldflags '-static'" \
+          -o bin/webdav-simulator-arm64 ./main.go
 
-      - name: Build for Linux AMD64
+      - name: Build AMD64 static binary
         run: |
           mkdir -p bin
-          GOOS=linux GOARCH=amd64 go build -o bin/webdav-simulator-amd64 ./main.go
+          CC=musl-gcc \
+          CGO_ENABLED=1 \
+          GOOS=linux \
+          GOARCH=amd64 \
+          go build -ldflags="-linkmode external -extldflags '-static'" \
+          -o bin/webdav-simulator-amd64 ./main.go
 
-      - name: Get current date for tag
+      - name: Verify binaries
+        run: |
+          file bin/webdav-simulator-arm64
+          file bin/webdav-simulator-amd64
+          ldd bin/webdav-simulator-amd64 2>&1 | grep -q "not a dynamic executable" && echo "Static binary verified" || exit 1
+
+      - name: Get current date
         id: date
-        run: |
-          echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-          echo "short_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
       - name: Commit binaries
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add bin/
-          git commit -m "Add multi-arch binaries built on ${{ steps.date.outputs.short_date }} [amd64+arm64]"
+          git commit -m "Add musl static binaries built on ${{ steps.date.outputs.date }} [arm64+amd64]"
           git push
