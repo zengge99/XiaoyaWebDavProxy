@@ -605,6 +605,7 @@ func main() {
 	dav := &webdav.Handler{
 		FileSystem: vfs,
 		LockSystem: webdav.NewMemLS(),
+		Propfind: vfs.PropFind,
 	}
 
 	// 设置HTTP路由
