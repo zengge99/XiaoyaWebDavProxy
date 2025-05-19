@@ -1,29 +1,65 @@
-name: Go CI
+name: Initialize Go Project
 
 on:
+  workflow_dispatch:  # 允许手动触发
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
 jobs:
-  build:
-    name: Build
+  initialize:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许工作流提交代码
+    
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史记录
+        
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.21'
         
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
     - name: Initialize Go module
-      run: go mod init simple-go-project
-      
-    - name: Build
-      run: go build -v .
-      
-    - name: Run
-      run: go run .
+      run: |
+        if [ ! -f go.mod ]; then
+          go mod init github.com/${{ github.repository }}
+          echo "✅ Go module initialized"
+        else
+          echo "ℹ️ go.mod already exists"
+        fi
+        
+    - name: Create project files
+      run: |
+        # 创建主程序文件
+        if [ ! -f main.go ]; then
+          cat << 'EOF' > main.go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, GitHub Actions!")
+}
+EOF
+          echo "✅ Created main.go"
+        fi
+        
+        # 创建README
+        if [ ! -f README.md ]; then
+          cat << 'EOF' > README.md
+# ${{ github.repository }}
+
+This is a Go project initialized automatically by GitHub Actions.
+
+## Project Structure
+
+- `main.go` - Main application file
+- `go.mod` - Go module definition
+
+## How to Run
+
+```bash
+go run .
