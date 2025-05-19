@@ -317,7 +317,7 @@ func main() {
 	// 示例文件列表
 	fileList := `/a/战狼2.mkv#65342
 /a/b/哪吒闹海.mkv#3389
-/test.txt#1024`
+/哪吒闹海.mkv#1024`
 
 	// 加载虚拟文件系统
 	err := vfs.LoadFromText(fileList)
