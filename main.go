@@ -80,7 +80,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 					fmt.Printf("Creating directory: %s\n", dirPath)
 					vfs.files[dirPath] = &VirtualFile{
 						name:        filepath.Base(dirPath),
-						displayName: "哪吒2(2025)",
+						displayName: filepath.Base(dirPath),
 						size:        0,
 						modTime:     time.Now(),
 						isDir:       true,
@@ -89,7 +89,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 					// 设置目录的 displayname 属性
 					vfs.files[dirPath].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
 						XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-						InnerXML: []byte("哪吒2(2025)"),
+						InnerXML: []byte(filepath.Base(dirPath)),
 					}
 				}
 			}
@@ -97,13 +97,13 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 
 		// 设置文件的 displayname，如果没有指定则使用文件名
 		if displayName == "" {
-			displayName = "哪吒2(2025)"
+			displayName = filepath.Base(path)
 		}
 
 		fmt.Printf("Adding file: %s, size: %d, displayName: %s\n", path, size, displayName)
 		vfs.files[path] = &VirtualFile{
 			name:        filepath.Base(path),
-			displayName: "哪吒2(2025)",
+			displayName: displayName,
 			size:        size,
 			modTime:     time.Now(),
 			isDir:       false,
@@ -112,7 +112,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 		// 设置文件的 displayname 属性
 		vfs.files[path].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
 			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-			InnerXML: []byte("哪吒2(2025)"),
+			InnerXML: []byte(displayName),
 		}
 	}
 
@@ -121,7 +121,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 		fmt.Println("Creating root directory")
 		vfs.files["/"] = &VirtualFile{
 			name:        "",
-			displayName: "哪吒2(2025)",
+			displayName: "",
 			size:        0,
 			modTime:     time.Now(),
 			isDir:       true,
@@ -130,7 +130,7 @@ func (vfs *VirtualFileSystem) LoadFromText(text string) error {
 		// 设置根目录的 displayname 属性
 		vfs.files["/"].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
 			XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-			InnerXML: []byte("哪吒2(2025)"),
+			InnerXML: []byte(""),
 		}
 	}
 
@@ -168,7 +168,7 @@ func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.Fi
 	}
 	vfs.files[name] = &VirtualFile{
 		name:        filepath.Base(name),
-		displayName: "哪吒2(2025)",
+		displayName: filepath.Base(name),
 		size:        0,
 		modTime:     time.Now(),
 		isDir:       true,
@@ -177,7 +177,7 @@ func (vfs *VirtualFileSystem) Mkdir(ctx context.Context, name string, perm os.Fi
 	// 设置新目录的 displayname 属性
 	vfs.files[name].properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
 		XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-		InnerXML: []byte("哪吒2(2025)"),
+		InnerXML: []byte(filepath.Base(name)),
 	}
 	fmt.Printf("Directory created: %s\n", name)
 	return nil
@@ -191,7 +191,7 @@ func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag in
 			fmt.Printf("Creating new file: %s\n", name)
 			f = &VirtualFile{
 				name:        filepath.Base(name),
-				displayName: "哪吒2(2025)",
+				displayName: filepath.Base(name),
 				size:        0,
 				modTime:     time.Now(),
 				isDir:       false,
@@ -200,7 +200,7 @@ func (vfs *VirtualFileSystem) OpenFile(ctx context.Context, name string, flag in
 			// 设置新文件的 displayname 属性
 			f.properties[xml.Name{Space: "DAV:", Local: "displayname"}] = webdav.Property{
 				XMLName:  xml.Name{Space: "DAV:", Local: "displayname"},
-				InnerXML: []byte("哪吒2(2025)"),
+				InnerXML: []byte(filepath.Base(name)),
 			}
 			vfs.files[name] = f
 			return &VirtualFileHandle{file: f}, nil
