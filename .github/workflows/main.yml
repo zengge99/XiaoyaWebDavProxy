@@ -4,6 +4,8 @@ on:
   workflow_dispatch:  # 允许手动触发
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/initialize-go-project.yml'
 
 jobs:
   initialize:
@@ -15,7 +17,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # 获取完整历史记录
+        fetch-depth: 0
         
     - name: Set up Go
       uses: actions/setup-go@v4
@@ -36,30 +38,15 @@ jobs:
         # 创建主程序文件
         if [ ! -f main.go ]; then
           cat << 'EOF' > main.go
-package main
+          package main
 
-import "fmt"
+          import "fmt"
 
-func main() {
-    fmt.Println("Hello, GitHub Actions!")
-}
-EOF
+          func main() {
+              fmt.Println("Hello, GitHub Actions!")
+          }
+          EOF
           echo "✅ Created main.go"
         fi
         
-        # 创建README
-        if [ ! -f README.md ]; then
-          cat << 'EOF' > README.md
-# ${{ github.repository }}
-
-This is a Go project initialized automatically by GitHub Actions.
-
-## Project Structure
-
-- `main.go` - Main application file
-- `go.mod` - Go module definition
-
-## How to Run
-
-```bash
-go run .
+        go run .
