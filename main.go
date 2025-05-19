@@ -16,7 +16,6 @@ import (
 	"golang.org/x/net/webdav"
 )
 
-// FileMeta 文件元数据结构
 type FileMeta struct {
 	Path        string
 	Size        int64
@@ -24,7 +23,6 @@ type FileMeta struct {
 	Content     []byte
 }
 
-// TextWebDAVFileSystem 模拟的文件系统
 type TextWebDAVFileSystem struct {
 	mu    sync.RWMutex
 	Files map[string]*FileMeta
@@ -32,7 +30,6 @@ type TextWebDAVFileSystem struct {
 	Port  int
 }
 
-// VirtualFile 虚拟文件实现
 type VirtualFile struct {
 	meta  *FileMeta
 	pos   int64
@@ -40,7 +37,6 @@ type VirtualFile struct {
 	flags int
 }
 
-// VirtualFileInfo 虚拟文件信息
 type VirtualFileInfo struct {
 	name    string
 	size    int64
@@ -50,18 +46,15 @@ type VirtualFileInfo struct {
 }
 
 func main() {
-	// 创建文件系统实例
 	fs := &TextWebDAVFileSystem{
 		Files: make(map[string]*FileMeta),
 		Auth:  make(map[string]string),
 		Port:  39124,
 	}
 
-	// 添加示例用户
-	fs.Auth["1"] = "1"
+	fs.Auth["用户名1"] = "密码1"
 	fmt.Printf("[系统] 添加用户: 用户名=用户名1, 密码=密码1\n")
 
-	// 加载模拟数据
 	err := fs.LoadFromText(`
 # 格式: 路径#大小#displayname
 /1.mkv#1024#哪吒2(2025)
@@ -73,16 +66,13 @@ func main() {
 		return
 	}
 
-	// 设置WebDAV处理器
 	handler := &webdav.Handler{
 		FileSystem: fs,
 		LockSystem: webdav.NewMemLS(),
 	}
 
-	// 添加认证中间件
 	authHandler := fs.authMiddleware(handler)
 
-	// 启动服务器
 	addr := fmt.Sprintf(":%d", fs.Port)
 	fmt.Printf("[系统] WebDAV 模拟器启动在端口 %d\n", fs.Port)
 	fmt.Printf("[系统] 使用用户名: 用户名1, 密码: 密码1 访问\n")
@@ -94,7 +84,6 @@ func main() {
 	}
 }
 
-// LoadFromText 从文本加载模拟数据
 func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	lineNum := 0
@@ -143,7 +132,6 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 	return nil
 }
 
-// authMiddleware 认证中间件
 func (fs *TextWebDAVFileSystem) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[请求] %s %s\n", r.Method, r.URL.Path)
@@ -167,12 +155,16 @@ func (fs *TextWebDAVFileSystem) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// OpenFile 实现 webdav.FileSystem 接口
 func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
 	fmt.Printf("[操作] OpenFile: %s (flag=%d)\n", name, flag)
+
+	// 根目录返回nil，由Stat处理
+	if name == "/" {
+		return nil, os.ErrNotExist
+	}
 
 	meta, ok := fs.Files[name]
 	if !ok {
@@ -187,12 +179,22 @@ func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag 
 	}, nil
 }
 
-// Stat 实现 webdav.FileSystem 接口
 func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
 	fmt.Printf("[操作] Stat: %s\n", name)
+
+	// 特殊处理根目录
+	if name == "/" {
+		return &VirtualFileInfo{
+			name:    "/",
+			size:    0,
+			path:    "/",
+			isDir:   true,
+			modTime: time.Now(),
+		}, nil
+	}
 
 	meta, ok := fs.Files[name]
 	if !ok {
@@ -220,31 +222,26 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 	}, nil
 }
 
-// Mkdir 实现 webdav.FileSystem 接口
 func (fs *TextWebDAVFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	fmt.Printf("[操作] Mkdir attempted: %s (read-only)\n", name)
 	return os.ErrPermission
 }
 
-// RemoveAll 实现 webdav.FileSystem 接口
 func (fs *TextWebDAVFileSystem) RemoveAll(ctx context.Context, name string) error {
 	fmt.Printf("[操作] RemoveAll attempted: %s (read-only)\n", name)
 	return os.ErrPermission
 }
 
-// Rename 实现 webdav.FileSystem 接口
 func (fs *TextWebDAVFileSystem) Rename(ctx context.Context, oldName, newName string) error {
 	fmt.Printf("[操作] Rename attempted: %s -> %s (read-only)\n", oldName, newName)
 	return os.ErrPermission
 }
 
-// Close 实现文件关闭
 func (f *VirtualFile) Close() error {
 	fmt.Printf("[文件] Close: %s\n", f.meta.Path)
 	return nil
 }
 
-// Read 实现文件读取
 func (f *VirtualFile) Read(p []byte) (int, error) {
 	if f.pos >= int64(len(f.meta.Content)) {
 		return 0, io.EOF
@@ -255,13 +252,11 @@ func (f *VirtualFile) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// Write 实现文件写入
 func (f *VirtualFile) Write(p []byte) (int, error) {
 	fmt.Printf("[文件] Write attempted on %s (read-only)\n", f.meta.Path)
 	return 0, os.ErrPermission
 }
 
-// Seek 实现文件定位
 func (f *VirtualFile) Seek(offset int64, whence int) (int64, error) {
 	var newPos int64
 	switch whence {
@@ -284,36 +279,23 @@ func (f *VirtualFile) Seek(offset int64, whence int) (int64, error) {
 	return f.pos, nil
 }
 
-// Readdir 实现目录读取
 func (f *VirtualFile) Readdir(count int) ([]os.FileInfo, error) {
 	fmt.Printf("[文件] Readdir attempted on %s (not a directory)\n", f.meta.Path)
 	return nil, os.ErrPermission
 }
 
-// Stat 获取文件信息
 func (f *VirtualFile) Stat() (os.FileInfo, error) {
 	return f.fs.Stat(context.Background(), f.meta.Path)
 }
 
-// Name 获取文件名
-func (fi *VirtualFileInfo) Name() string { return fi.name }
-
-// Size 获取文件大小
-func (fi *VirtualFileInfo) Size() int64 { return fi.size }
-
-// Mode 获取文件模式
-func (fi *VirtualFileInfo) Mode() os.FileMode {
+func (fi *VirtualFileInfo) Name() string       { return fi.name }
+func (fi *VirtualFileInfo) Size() int64        { return fi.size }
+func (fi *VirtualFileInfo) Mode() os.FileMode  { 
 	if fi.isDir {
-		return 0755
+		return 0755 | os.ModeDir
 	}
-	return 0444
+	return 0444 
 }
-
-// ModTime 获取修改时间
 func (fi *VirtualFileInfo) ModTime() time.Time { return fi.modTime }
-
-// IsDir 判断是否是目录
-func (fi *VirtualFileInfo) IsDir() bool { return fi.isDir }
-
-// Sys 获取底层数据
-func (fi *VirtualFileInfo) Sys() interface{} { return nil }
+func (fi *VirtualFileInfo) IsDir() bool        { return fi.isDir }
+func (fi *VirtualFileInfo) Sys() interface{}   { return nil }
