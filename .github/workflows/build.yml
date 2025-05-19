@@ -1,4 +1,4 @@
-name: Build Static Binaries with musl
+name: Build Static Multi-Arch Binaries
 
 on:
   push:
@@ -11,13 +11,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Install musl-tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev
+      - name: Set up QEMU for multi-arch
+        uses: docker/setup-qemu-action@v2
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -29,40 +25,34 @@ jobs:
           go mod tidy
           go get golang.org/x/net/webdav
 
-      - name: Build ARM64 static binary
+      - name: Build ARM64 binary (static)
         run: |
           mkdir -p bin
-          CC=musl-gcc \
-          CGO_ENABLED=1 \
-          GOOS=linux \
-          GOARCH=arm64 \
-          go build -ldflags="-linkmode external -extldflags '-static'" \
-          -o bin/webdav-simulator-arm64 ./main.go
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/usr/src/myapp \
+            -w /usr/src/myapp \
+            golang:1.21-alpine \
+            sh -c 'CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/webdav-simulator-arm64 ./main.go'
 
-      - name: Build AMD64 static binary
+      - name: Build AMD64 binary (static)
         run: |
           mkdir -p bin
-          CC=musl-gcc \
-          CGO_ENABLED=1 \
-          GOOS=linux \
-          GOARCH=amd64 \
-          go build -ldflags="-linkmode external -extldflags '-static'" \
-          -o bin/webdav-simulator-amd64 ./main.go
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD":/usr/src/myapp \
+            -w /usr/src/myapp \
+            golang:1.21-alpine \
+            sh -c 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/webdav-simulator-amd64 ./main.go'
 
       - name: Verify binaries
         run: |
           file bin/webdav-simulator-arm64
           file bin/webdav-simulator-amd64
-          ldd bin/webdav-simulator-amd64 2>&1 | grep -q "not a dynamic executable" && echo "Static binary verified" || exit 1
-
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          ! ldd bin/webdav-simulator-amd64 2>&1 | grep -q "not a dynamic executable" || echo "Static binary verified"
 
       - name: Commit binaries
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add bin/
-          git commit -m "Add musl static binaries built on ${{ steps.date.outputs.date }} [arm64+amd64]"
+          git commit -m "Add static multi-arch binaries"
           git push
