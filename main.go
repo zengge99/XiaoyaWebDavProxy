@@ -62,7 +62,7 @@ func main() {
 	fmt.Printf("密码: 1\n")
 
 	err := fs.LoadFromText(`
-/1.mkv#1024#电影文件
+/1.mkv#1024#哪吒2(2025)
 /2.pdf#512#文档资料
 /docs/3.txt#128#重要笔记
 `)
