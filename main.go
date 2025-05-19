@@ -55,11 +55,8 @@ func main() {
 		Port:  39124,
 	}
 
-	// 设置用户名和密码都为1
 	fs.Auth["1"] = "1"
-	fmt.Printf("WebDAV 模拟器已启动\n")
-	fmt.Printf("用户名: 1\n")
-	fmt.Printf("密码: 1\n")
+	fmt.Printf("WebDAV 模拟器已启动\n用户名: 1\n密码: 1\n")
 
 	err := fs.LoadFromText(`
 /1.mkv#1024#哪吒2(2025)
@@ -76,7 +73,6 @@ func main() {
 		LockSystem: webdav.NewMemLS(),
 	}
 
-	// 包装handler以处理PROPFIND请求
 	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "PROPFIND" {
 			fs.HandlePropfind(w, r)
@@ -88,8 +84,7 @@ func main() {
 	authHandler := fs.authMiddleware(wrappedHandler)
 
 	addr := fmt.Sprintf(":%d", fs.Port)
-	fmt.Printf("服务器运行在端口 %d\n", fs.Port)
-	fmt.Printf("访问地址: http://localhost:%d\n", fs.Port)
+	fmt.Printf("服务器运行在端口 %d\n访问地址: http://localhost:%d\n", fs.Port, fs.Port)
 
 	err = http.ListenAndServe(addr, authHandler)
 	if err != nil {
@@ -138,7 +133,6 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 		}
 		fs.mu.Unlock()
 
-		// 自动创建父目录
 		dir := filepath.Dir(path)
 		if dir != "/" {
 			fs.mu.Lock()
@@ -186,39 +180,36 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	// 检查资源是否存在
 	_, ok := fs.Files[path]
 	if !ok && path != "/" {
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
 
-	// 构建响应
 	type Prop struct {
-		Displayname     *string `xml:"displayname,omitempty"`
-		Getcontenttype  *string `xml:"getcontenttype,omitempty"`
-		Getcontentlength *int64  `xml:"getcontentlength,omitempty"`
-		Getlastmodified *string `xml:"getlastmodified,omitempty"`
+		XMLName        xml.Name `xml:"D:prop"`
+		Displayname     *string `xml:"D:displayname,omitempty"`
+		Getcontenttype  *string `xml:"D:getcontenttype,omitempty"`
+		Getcontentlength *int64  `xml:"D:getcontentlength,omitempty"`
+		Getlastmodified *string `xml:"D:getlastmodified,omitempty"`
 		Resourcetype    *struct {
-			Collection *struct{} `xml:"collection,omitempty"`
-		} `xml:"resourcetype,omitempty"`
+			Collection *struct{} `xml:"D:collection,omitempty"`
+		} `xml:"D:resourcetype,omitempty"`
 	}
 
 	type Propstat struct {
-		Prop    Prop   `xml:"prop"`
-		Status  string `xml:"status"`
+		Prop    Prop   `xml:"D:prop"`
+		Status  string `xml:"D:status"`
 	}
 
 	type Response struct {
-		Href     string   `xml:"href"`
-		Propstat Propstat `xml:"propstat"`
+		Href     string   `xml:"D:href"`
+		Propstat Propstat `xml:"D:propstat"`
 	}
 
 	responses := []Response{}
 
-	// 如果是目录，添加目录本身和其内容
 	if path == "/" || (ok && fs.Files[path].IsDir) {
-		// 添加目录本身的响应
 		displayName := "/"
 		modTime := time.Now()
 		if path != "/" {
@@ -234,7 +225,7 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 					Displayname:     &displayName,
 					Getlastmodified: strPtr(modTime.UTC().Format(http.TimeFormat)),
 					Resourcetype: &struct {
-						Collection *struct{} `xml:"collection,omitempty"`
+						Collection *struct{} `xml:"D:collection,omitempty"`
 					}{
 						Collection: &struct{}{},
 					},
@@ -242,7 +233,6 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 			},
 		})
 
-		// 添加目录内容的响应
 		for filePath, meta := range fs.Files {
 			if filepath.Dir(filePath) == path && filePath != path {
 				contentType := "application/octet-stream"
@@ -255,11 +245,11 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 				}
 
 				var resourcetype *struct {
-					Collection *struct{} `xml:"collection,omitempty"`
+					Collection *struct{} `xml:"D:collection,omitempty"`
 				}
 				if meta.IsDir {
 					resourcetype = &struct {
-						Collection *struct{} `xml:"collection,omitempty"`
+						Collection *struct{} `xml:"D:collection,omitempty"`
 					}{
 						Collection: &struct{}{},
 					}
@@ -281,7 +271,6 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 			}
 		}
 	} else {
-		// 单个文件的响应
 		meta := fs.Files[path]
 		contentType := "application/octet-stream"
 		if strings.HasSuffix(path, ".txt") {
@@ -309,7 +298,7 @@ func (fs *TextWebDAVFileSystem) HandlePropfind(w http.ResponseWriter, r *http.Re
 	multistatus := struct {
 		XMLName    xml.Name   `xml:"D:multistatus"`
 		XmlnsD     string     `xml:"xmlns:D,attr"`
-		Responses  []Response `xml:"response"`
+		Responses  []Response `xml:"D:response"`
 	}{
 		XmlnsD:    "DAV:",
 		Responses: responses,
