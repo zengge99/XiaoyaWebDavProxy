@@ -1,0 +1,37 @@
+name: Build ARM64 Binary and Commit
+
+on:
+  push:
+    branches: [ "main" ]  # 可以根据需要修改触发的分支
+  workflow_dispatch:      # 允许手动触发
+
+jobs:
+  build-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整的提交历史
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'  # 使用你项目需要的 Go 版本
+
+      - name: Build for Linux ARM64
+        run: |
+          mkdir -p bin
+          GOOS=linux GOARCH=arm64 go build -o bin/webdav-simulator-arm64 ./main.go
+          
+      - name: Get current date for tag
+        id: date
+        run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Commit binary
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add bin/
+          git commit -m "Add ARM64 binary built on ${{ steps.date.outputs.date }}"
+          git push
