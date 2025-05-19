@@ -53,16 +53,15 @@ func main() {
 	}
 
 	fs.Auth["1"] = "1"
-	fmt.Printf("[系统] 添加用户: 用户名=用户名1, 密码=密码1\n")
+	fmt.Printf("添加用户: 用户名=用户名1, 密码=密码1\n")
 
 	err := fs.LoadFromText(`
-# 格式: 路径#大小#displayname
 /1.mkv#1024#哪吒2(2025)
 /2.pdf#512#项目报告2025
 /docs/3.txt#128#重要笔记
 `)
 	if err != nil {
-		fmt.Printf("[系统] 加载数据错误: %v\n", err)
+		fmt.Printf("加载数据错误: %v\n", err)
 		return
 	}
 
@@ -74,22 +73,18 @@ func main() {
 	authHandler := fs.authMiddleware(handler)
 
 	addr := fmt.Sprintf(":%d", fs.Port)
-	fmt.Printf("[系统] WebDAV 模拟器启动在端口 %d\n", fs.Port)
-	fmt.Printf("[系统] 使用用户名: 用户名1, 密码: 密码1 访问\n")
-	fmt.Printf("[系统] 测试URL: http://localhost:%d\n", fs.Port)
+	fmt.Printf("WebDAV 模拟器启动在端口 %d\n", fs.Port)
+	fmt.Printf("测试URL: http://localhost:%d\n", fs.Port)
 
 	err = http.ListenAndServe(addr, authHandler)
 	if err != nil {
-		fmt.Printf("[系统] 服务器错误: %v\n", err)
+		fmt.Printf("服务器错误: %v\n", err)
 	}
 }
 
 func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 	scanner := bufio.NewScanner(strings.NewReader(text))
-	lineNum := 0
-
 	for scanner.Scan() {
-		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -97,25 +92,25 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 
 		parts := strings.Split(line, "#")
 		if len(parts) < 3 {
-			return fmt.Errorf("第%d行格式错误: 需要 path#size#displayname", lineNum)
+			return fmt.Errorf("格式错误: 需要 path#size#displayname")
 		}
 
 		path := strings.TrimSpace(parts[0])
 		size, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
 		if err != nil {
-			return fmt.Errorf("第%d行大小格式错误: %v", lineNum, err)
+			return fmt.Errorf("大小格式错误: %v", err)
 		}
 
 		displayName := strings.TrimSpace(parts[2])
 		if path == "" || displayName == "" {
-			return fmt.Errorf("第%d行路径或显示名不能为空", lineNum)
+			return fmt.Errorf("路径或显示名不能为空")
 		}
 
 		if !strings.HasPrefix(path, "/") {
 			path = "/" + path
 		}
 
-		content := []byte(fmt.Sprintf("这是文件 %s 的模拟内容。大小: %d 字节", path, size))
+		content := []byte(fmt.Sprintf("模拟文件内容: %s", path))
 
 		fs.mu.Lock()
 		fs.Files[path] = &FileMeta{
@@ -126,7 +121,7 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 		}
 		fs.mu.Unlock()
 
-		fmt.Printf("[系统] 加载文件: 路径=%s, 大小=%d, 显示名=%s\n", path, size, displayName)
+		fmt.Printf("加载文件: %s (%d bytes)\n", path, size)
 	}
 
 	return nil
@@ -134,23 +129,18 @@ func (fs *TextWebDAVFileSystem) LoadFromText(text string) error {
 
 func (fs *TextWebDAVFileSystem) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("[请求] %s %s\n", r.Method, r.URL.Path)
-
 		username, password, ok := r.BasicAuth()
 		if !ok {
-			fmt.Printf("[认证] 请求缺少认证头\n")
 			w.Header().Set("WWW-Authenticate", `Basic realm="WebDAV"`)
 			http.Error(w, "需要认证", http.StatusUnauthorized)
 			return
 		}
 
 		if fs.Auth[username] != password {
-			fmt.Printf("[认证] 失败: 用户名=%s\n", username)
 			http.Error(w, "认证失败", http.StatusUnauthorized)
 			return
 		}
 
-		fmt.Printf("[认证] 成功: 用户名=%s\n", username)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -159,11 +149,15 @@ func (fs *TextWebDAVFileSystem) OpenFile(ctx context.Context, name string, flag 
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	fmt.Printf("[操作] OpenFile: %s (flag=%d)\n", name, flag)
-
-	// 根目录返回nil，由Stat处理
 	if name == "/" {
-		return nil, os.ErrNotExist
+		return &VirtualFile{
+			meta: &FileMeta{
+				Path:        "/",
+				DisplayName: "Root",
+				Content:     []byte{},
+			},
+			fs: fs,
+		}, nil
 	}
 
 	meta, ok := fs.Files[name]
@@ -183,9 +177,6 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	fmt.Printf("[操作] Stat: %s\n", name)
-
-	// 特殊处理根目录
 	if name == "/" {
 		return &VirtualFileInfo{
 			name:    "/",
@@ -223,22 +214,18 @@ func (fs *TextWebDAVFileSystem) Stat(ctx context.Context, name string) (os.FileI
 }
 
 func (fs *TextWebDAVFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
-	fmt.Printf("[操作] Mkdir attempted: %s (read-only)\n", name)
 	return os.ErrPermission
 }
 
 func (fs *TextWebDAVFileSystem) RemoveAll(ctx context.Context, name string) error {
-	fmt.Printf("[操作] RemoveAll attempted: %s (read-only)\n", name)
 	return os.ErrPermission
 }
 
 func (fs *TextWebDAVFileSystem) Rename(ctx context.Context, oldName, newName string) error {
-	fmt.Printf("[操作] Rename attempted: %s -> %s (read-only)\n", oldName, newName)
 	return os.ErrPermission
 }
 
 func (f *VirtualFile) Close() error {
-	fmt.Printf("[文件] Close: %s\n", f.meta.Path)
 	return nil
 }
 
@@ -248,12 +235,10 @@ func (f *VirtualFile) Read(p []byte) (int, error) {
 	}
 	n := copy(p, f.meta.Content[f.pos:])
 	f.pos += int64(n)
-	fmt.Printf("[文件] Read %d bytes from %s (pos=%d)\n", n, f.meta.Path, f.pos)
 	return n, nil
 }
 
 func (f *VirtualFile) Write(p []byte) (int, error) {
-	fmt.Printf("[文件] Write attempted on %s (read-only)\n", f.meta.Path)
 	return 0, os.ErrPermission
 }
 
@@ -275,13 +260,35 @@ func (f *VirtualFile) Seek(offset int64, whence int) (int64, error) {
 	}
 
 	f.pos = newPos
-	fmt.Printf("[文件] Seek %s to %d (whence=%d)\n", f.meta.Path, f.pos, whence)
 	return f.pos, nil
 }
 
 func (f *VirtualFile) Readdir(count int) ([]os.FileInfo, error) {
-	fmt.Printf("[文件] Readdir attempted on %s (not a directory)\n", f.meta.Path)
-	return nil, os.ErrPermission
+	if !f.meta.IsDir {
+		return nil, os.ErrInvalid
+	}
+
+	var files []os.FileInfo
+	f.fs.mu.RLock()
+	defer f.fs.mu.RUnlock()
+
+	for path, meta := range f.fs.Files {
+		dir := f.meta.Path
+		if dir != "/" {
+			dir += "/"
+		}
+		if strings.HasPrefix(path, dir) && !strings.Contains(path[len(dir):], "/") {
+			files = append(files, &VirtualFileInfo{
+				name:    meta.DisplayName,
+				size:    meta.Size,
+				path:    meta.Path,
+				isDir:   false,
+				modTime: time.Now(),
+			})
+		}
+	}
+
+	return files, nil
 }
 
 func (f *VirtualFile) Stat() (os.FileInfo, error) {
@@ -290,12 +297,7 @@ func (f *VirtualFile) Stat() (os.FileInfo, error) {
 
 func (fi *VirtualFileInfo) Name() string       { return fi.name }
 func (fi *VirtualFileInfo) Size() int64        { return fi.size }
-func (fi *VirtualFileInfo) Mode() os.FileMode  { 
-	if fi.isDir {
-		return 0755 | os.ModeDir
-	}
-	return 0444 
-}
+func (fi *VirtualFileInfo) Mode() os.FileMode  { return 0444 }
 func (fi *VirtualFileInfo) ModTime() time.Time { return fi.modTime }
 func (fi *VirtualFileInfo) IsDir() bool        { return fi.isDir }
 func (fi *VirtualFileInfo) Sys() interface{}   { return nil }
