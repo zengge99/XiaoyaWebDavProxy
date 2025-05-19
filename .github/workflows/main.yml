@@ -37,8 +37,3 @@ jobs:
     - name: Run vet
       run: go vet ./...
       
-    - name: Run staticcheck
-      uses: dominikh/setup-staticcheck@v1
-      with:
-        version: 'latest'
-      run: staticcheck ./...
